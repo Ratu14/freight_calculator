@@ -504,7 +504,7 @@
     btn.disabled = true;
     setStatus('loading', '\u23f3 Uploading...');
 
-    const body = new URLSearchParams({
+    const fields = {
       'Load_Pt'       : loadPt,
       'Unload_Pt'     : unloadPt,
       'Single_KM'     : singleKm,
@@ -520,16 +520,50 @@
       'Total_Expense' : Math.round(totalExp),
       'Freight_Income': Math.round(freight),
       'Net_Profit'    : Math.round(profit),
-    });
+    };
+
+    // Try the API v2 with refresh token first, fallback to form POST
+    const refreshToken = '1000.2fcf78cae082781661aa0d1567e0b684.621176292a5d6e3c2eacf87e1e029bf9';
+    const clientId     = '1000.XB5IYRHC4REC89JV1KZWVBMBSY3NMX';
+    const clientSecret = '9be9480d95efbdfe8f70bf8a5c93a4c6050ea35832';
 
     try {
+      // Step 1: Get access token via proxy
+      let accessToken = null;
+      try {
+        const tokenResp = await fetch('https://cors.sh/https://accounts.zoho.in/oauth/v2/token', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'x-cors-api-key': 'temp_' },
+          body   : new URLSearchParams({ grant_type:'refresh_token', client_id:clientId, client_secret:clientSecret, refresh_token:refreshToken })
+        });
+        const td = await tokenResp.json();
+        accessToken = td.access_token;
+      } catch(e) { /* fallback below */ }
+
+      if (accessToken) {
+        // Step 2a: Use Zoho Creator API v2
+        const apiUrl = 'https://creator.zoho.in/api/v2/thenpandiyan/transport/form/Freight_calculator_form';
+        const resp = await fetch('https://cors.sh/' + apiUrl, {
+          method : 'POST',
+          headers: { 'Authorization': 'Zoho-oauthtoken ' + accessToken, 'Content-Type': 'application/json', 'x-cors-api-key': 'temp_' },
+          body   : JSON.stringify({ data: fields })
+        });
+        const result = await resp.json();
+        if (result.code === 3000) {
+          setStatus('success', '\u2705 Record saved! ID: ' + (result.data && result.data.ID || '\u2014'));
+          btn.disabled = false; return;
+        }
+      }
+
+      // Step 2b: Fallback — direct form POST (no-cors)
+      const body = new URLSearchParams(Object.fromEntries(Object.entries(fields).map(([k,v])=>[k,String(v)])));
       await fetch('https://creatorapp.zoho.in/thenpandiyan/transport/form-perma/Freight_calculator_form/', {
         method : 'POST',
         mode   : 'no-cors',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body   : body
       });
-      setStatus('success', '\u2705 Sent! Check Zoho Creator to confirm the record was saved.');
+      setStatus('success', '\u2705 Sent! Open Zoho Creator to confirm the record was saved.');
     } catch(err) {
       setStatus('error', '\u274c Error: ' + err.message);
     } finally {
